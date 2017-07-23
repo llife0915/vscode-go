@@ -11,6 +11,9 @@ import { parseFilePrelude, isVendorSupported, getBinPath, getCurrentGoWorkspaceF
 import { documentSymbols } from './goOutline';
 import { promptForMissingTool } from './goInstallTools';
 import path = require('path');
+import { getRelativePackagePath } from './goPackages';
+
+const missingToolMsg = 'Missing tool: ';
 
 export function listPackages(excludeImportedPkgs: boolean = false): Thenable<string[]> {
 	let importsPromise = excludeImportedPkgs && vscode.window.activeTextEditor ? getImports(vscode.window.activeTextEditor.document) : Promise.resolve([]);
@@ -18,8 +21,7 @@ export function listPackages(excludeImportedPkgs: boolean = false): Thenable<str
 	let goPkgsPromise = new Promise<string[]>((resolve, reject) => {
 		cp.execFile(getBinPath('gopkgs'), [], (err, stdout, stderr) => {
 			if (err && (<any>err).code === 'ENOENT') {
-				promptForMissingTool('gopkgs');
-				return reject();
+				return reject(missingToolMsg + 'gopkgs');
 			}
 			let lines = stdout.toString().split('\n');
 			if (lines[lines.length - 1] === '') {
@@ -51,30 +53,10 @@ export function listPackages(excludeImportedPkgs: boolean = false): Thenable<str
 				if (!pkg || importedPkgs.indexOf(pkg) > -1) {
 					return;
 				}
-
-				let magicVendorString = '/vendor/';
-				let vendorIndex = pkg.indexOf(magicVendorString);
-				if (vendorIndex === -1) {
-					magicVendorString = 'vendor/';
-					if (pkg.startsWith(magicVendorString)) {
-						vendorIndex = 0;
-					}
+				let relativePkgPath = getRelativePackagePath(currentFileDirPath, currentWorkspace, pkg);
+				if (relativePkgPath) {
+					pkgSet.add(relativePkgPath);
 				}
-				// Check if current file and the vendor pkg belong to the same root project
-				// If yes, then vendor pkg can be replaced with its relative path to the "vendor" folder
-				// If not, then the vendor pkg should not be allowed to be imported.
-				if (vendorIndex > -1) {
-					let rootProjectForVendorPkg = path.join(currentWorkspace, pkg.substr(0, vendorIndex));
-					let relativePathForVendorPkg = pkg.substring(vendorIndex + magicVendorString.length);
-
-					if (relativePathForVendorPkg && currentFileDirPath.startsWith(rootProjectForVendorPkg)) {
-						pkgSet.add(relativePathForVendorPkg);
-					}
-					return;
-				}
-
-				// pkg is not a vendor project
-				pkgSet.add(pkg);
 			});
 
 			return Array.from(pkgSet).sort();
@@ -103,6 +85,10 @@ function getImports(document: vscode.TextDocument): Promise<string[]> {
 function askUserForImport(): Thenable<string> {
 	return listPackages(true).then(packages => {
 		return vscode.window.showQuickPick(packages);
+	}, err => {
+		if (typeof err === 'string' && err.startsWith(missingToolMsg)) {
+			promptForMissingTool(err.substr(missingToolMsg.length));
+		}
 	});
 }
 

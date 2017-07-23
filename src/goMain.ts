@@ -27,13 +27,15 @@ import { testAtCursor, testCurrentPackage, testCurrentFile, testPrevious, showTe
 import * as goGenerateTests from './goGenerateTests';
 import { addImport } from './goImport';
 import { installAllTools, checkLanguageServer } from './goInstallTools';
-import { isGoPathSet, getBinPath, sendTelemetryEvent, getExtensionCommands } from './util';
+import { isGoPathSet, getBinPath, sendTelemetryEvent, getExtensionCommands, getGoVersion } from './util';
 import { LanguageClient } from 'vscode-languageclient';
 import { clearCacheForTools } from './goPath';
 import { addTags, removeTags } from './goModifytags';
 import { parseLiveFile } from './goLiveErrors';
 import { GoCodeLensProvider } from './goCodelens';
 import { implCursor } from './goImpl';
+import { goListAll } from './goPackages';
+import { browsePackages } from './goBrowsePackage';
 
 export let errorDiagnosticCollection: vscode.DiagnosticCollection;
 let warningDiagnosticCollection: vscode.DiagnosticCollection;
@@ -44,6 +46,24 @@ export function activate(ctx: vscode.ExtensionContext): void {
 	let toolsGopath = vscode.workspace.getConfiguration('go')['toolsGopath'];
 
 	updateGoPathGoRootFromConfig().then(() => {
+		getGoVersion().then(currentVersion => {
+			if (currentVersion) {
+				const prevVersion = ctx.globalState.get('goVersion');
+				const currVersionString = `${currentVersion.major}.${currentVersion.minor}`;
+
+				if (prevVersion !== currVersionString) {
+					if (prevVersion) {
+						vscode.window.showInformationMessage('Your Go version is different than before, few Go tools may need re-compiling', 'Update tools').then(selected => {
+							if (selected === 'Rebuild tools') {
+								vscode.commands.executeCommand('go.tools.install');
+							}
+						});
+					}
+					ctx.globalState.update('goVersion', currVersionString);
+				}
+			}
+		});
+		goListAll();
 		offerToInstallTools();
 		let langServerAvailable = checkLanguageServer();
 		if (langServerAvailable) {
@@ -162,6 +182,10 @@ export function activate(ctx: vscode.ExtensionContext): void {
 
 	ctx.subscriptions.push(vscode.commands.registerCommand('go.tools.install', () => {
 		installAllTools();
+	}));
+
+	ctx.subscriptions.push(vscode.commands.registerCommand('go.browse.packages', () => {
+		browsePackages();
 	}));
 
 	ctx.subscriptions.push(vscode.workspace.onDidChangeConfiguration(() => {

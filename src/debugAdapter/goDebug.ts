@@ -137,7 +137,7 @@ interface LaunchRequestArguments extends DebugProtocol.LaunchRequestArguments {
 	host?: string;
 	buildFlags?: string;
 	init?: string;
-	trace?: boolean|'verbose';
+	trace?: boolean | 'verbose';
 	/** Optional path to .env file. */
 	envFile?: string;
 	backend?: string;
@@ -188,6 +188,7 @@ class Delve {
 	onstdout: (str: string) => void;
 	onstderr: (str: string) => void;
 	onclose: (code: number) => void;
+	noDebug: boolean;
 
 	constructor(remotePath: string, port: number, host: string, program: string, launchArgs: LaunchRequestArguments) {
 		this.program = program;
@@ -227,29 +228,31 @@ class Delve {
 			}
 
 			let env = Object.assign({}, process.env, fileEnv, launchArgs.env);
-			if (!!launchArgs.noDebug && mode === 'debug' && !isProgramDirectory) {
-				this.debugProcess = spawn(getGoRuntimePath(), ['run', program], { env });
-				this.debugProcess.stderr.on('data', chunk => {
-					let str = chunk.toString();
-					if (this.onstderr) { this.onstderr(str); }
-				});
-				this.debugProcess.stdout.on('data', chunk => {
-					let str = chunk.toString();
-					if (this.onstdout) { this.onstdout(str); }
-				});
-				this.debugProcess.on('close', (code) => {
-					logError('Process exiting with code: ' + code);
-					if (this.onclose) { this.onclose(code); }
-				});
-				this.debugProcess.on('error', function (err) {
-					reject(err);
-				});
-				resolve();
-				return;
+			if (!!launchArgs.noDebug) {
+				if (mode === 'debug' && !isProgramDirectory) {
+					this.noDebug = true;
+					this.debugProcess = spawn(getGoRuntimePath(), ['run', program], { env });
+					this.debugProcess.stderr.on('data', chunk => {
+						let str = chunk.toString();
+						if (this.onstderr) { this.onstderr(str); }
+					});
+					this.debugProcess.stdout.on('data', chunk => {
+						let str = chunk.toString();
+						if (this.onstdout) { this.onstdout(str); }
+					});
+					this.debugProcess.on('close', (code) => {
+						logError('Process exiting with code: ' + code);
+						if (this.onclose) { this.onclose(code); }
+					});
+					this.debugProcess.on('error', function (err) {
+						reject(err);
+					});
+					resolve();
+					return;
+				}
 			}
-
+			this.noDebug = false;
 			let serverRunning = false;
-
 
 			if (mode === 'remote') {
 				this.debugProcess = null;
@@ -328,7 +331,7 @@ class Delve {
 				logError('Process exiting with code: ' + code);
 				if (this.onclose) { this.onclose(code); }
 			});
-			this.debugProcess.on('error', function(err) {
+			this.debugProcess.on('error', function (err) {
 				reject(err);
 			});
 		});
@@ -455,7 +458,7 @@ class GoDebugSession extends DebugSession {
 		};
 
 		this.delve.connection.then(() => {
-			if (!args.noDebug) {
+			if (!this.delve.noDebug) {
 				this.sendEvent(new InitializedEvent());
 				verbose('InitializeEvent');
 			}
@@ -689,7 +692,7 @@ class GoDebugSession extends DebugSession {
 		let variables;
 		if (vari.kind === GoReflectKind.Array || vari.kind === GoReflectKind.Slice || vari.kind === GoReflectKind.Map) {
 			variables = vari.children.map((v, i) => {
-				let { result, variablesReference} = this.convertDebugVariableToProtocolVariable(v, i);
+				let { result, variablesReference } = this.convertDebugVariableToProtocolVariable(v, i);
 				return {
 					name: '[' + i + ']',
 					value: result,
@@ -698,7 +701,7 @@ class GoDebugSession extends DebugSession {
 			});
 		} else {
 			variables = vari.children.map((v, i) => {
-				let { result, variablesReference} = this.convertDebugVariableToProtocolVariable(v, i);
+				let { result, variablesReference } = this.convertDebugVariableToProtocolVariable(v, i);
 				return {
 					name: v.name,
 					value: result,
@@ -855,7 +858,7 @@ function killTree(processId: number): void {
 		// on linux and OS X we kill all direct and indirect child processes as well
 		try {
 			const cmd = path.join(__dirname, '../../../scripts/terminateProcess.sh');
-			spawnSync(cmd, [ processId.toString() ]);
+			spawnSync(cmd, [processId.toString()]);
 		} catch (err) {
 		}
 	}
